@@ -1,17 +1,26 @@
 #!/usr/bin/env python
 """
-A script to (semi) automate the deployment of the Mercury project Timetables web
-app. The code is obtained from a specific tag in a git repository, then external
-data and configurations are overlayed.
-"""
+A tool to automate deployment of the the Mercury project Timetables web app. 
+The code is obtained from a specific tag in a git repository, then external
+data and configurations are overlayed. File permissions are set appropriately 
+for the web server.
 
-import argparse, collections, git, tempfile, os, shutil, sys, datetime, pwd, grp
+The aim is to minimise the potential for human errror when assembling a 
+Timetables deployment, allowing greater confidence that a given deployment can 
+be repeated.
+"""
+# Non standard dependancies:
+# - argparse: either use Python >= 2.7 or easy_install argparse
+# - git: GitPython: http://gitorious.org/git-python   easy_install gitpython
+
+import argparse, collections, git, tempfile, os, shutil, sys, pwd, grp
 from os.path import join
+from datetime import datetime
 
 def create_temp_directory():
     return tempfile.mkdtemp()
 
-def init_from_git_repository(dir, repo_path, tag):
+def init_directory_from_git_repository(dir, repo_path, tag):
     repo = git.Repo.clone_from(repo_path, dir)
     if not tag in repo.tags:
         raise Exception("No such tag: {0}".format(tag))
@@ -34,7 +43,8 @@ def create_if_not_present(path):
         pass
 
 def populate_directory(dir, config):
-    init_from_git_repository(dir, config.source_repo_path, config.source_tag)
+    init_directory_from_git_repository(dir, config.source_repo_path, 
+                                       config.source_tag)
     overlay_config(dir, config.config_path)
     overlay_data(dir, config.data_path)
     # The log file currently has to exist
@@ -64,7 +74,7 @@ def setup_permissions(dir, www_user, www_group):
     recursive_take_ownership(join(dir, DATA_PATH), www_user, www_group)
 
 def timestamp():
-    return datetime.datetime.now().strftime(ISO_8601_DT_BASIC)
+    return datetime.now().strftime(ISO_8601_DT_BASIC)
 
 def create_deployment_file(dir, config):
     with open(join(dir, DEPLOYMENT_FILE), "w") as f:
@@ -91,34 +101,34 @@ def deploy(config):
     return deployment_destination_dir
 
 # Define our command line arguments
-PARSER = argparse.ArgumentParser()
-PARSER.add_argument("destination_path", metavar="DESTINATION", nargs="?", 
-                    default=".", 
+PARSER = argparse.ArgumentParser(description=__doc__)
+PARSER.add_argument("destination_path", metavar="DESTINATION", nargs="?",
+                    default=".",
                     help="The directory to deploy into. A single subdirectory "
                     "will be created containing the deployed files. (default: "
                     "current directory)")
-PARSER.add_argument("-s", "--source-repo", metavar="PATH", required=True, 
+PARSER.add_argument("-s", "--source-repo", metavar="PATH", required=True,
                     dest="source_repo_path",
                     help="The path to the git repo to deploy from.")
-PARSER.add_argument("-t", "--tag", metavar="TAG", required=True, 
+PARSER.add_argument("-t", "--tag", metavar="TAG", required=True,
                     dest="source_tag",
                     help="The name of a tag in the source git repository to "
                     "deploy from.")
-PARSER.add_argument("-c", "--config", metavar="PATH", required=True, 
+PARSER.add_argument("-c", "--config", metavar="PATH", required=True,
                     dest="config_path",
                     help="The configuration file to use for this deployment. "
                     "This will replace ")
-PARSER.add_argument("-d", "--data", metavar="PATH", required=True, 
+PARSER.add_argument("-d", "--data", metavar="PATH", required=True,
                     dest="data_path",
                     help="A data directory to use in the deployment.")
 PARSER.add_argument("-n", "--name", metavar="NAME", default="timetables",
                     dest="deployment_name",
                     help="The name of the deployment. This will be used as the "
                     "prefix to the name of the deployment directory.")
-PARSER.add_argument("-u", "--www-user", metavar="NAME", dest="www_user", 
+PARSER.add_argument("-u", "--www-user", metavar="NAME", dest="www_user",
                     required=True,
                     help="The user name the web server runs as.")
-PARSER.add_argument("-g", "--www-group", metavar="NAME", dest="www_group", 
+PARSER.add_argument("-g", "--www-group", metavar="NAME", dest="www_group",
                     required=True,
                     help="The group name the web server runs as.")
 
@@ -158,6 +168,9 @@ def create_config(cmd_line_args):
     return DeploymentConfig(**dict(config_args))
 
 if __name__ == "__main__":
+    if os.name != "posix":
+        print >> sys.stderr, "** I don't appear to be running on a UNIX system. "\
+                             "I'm probably not going to work. **"
     args = PARSER.parse_args()
     # Convert user and group names to IDs for use with chmod/chown
     args.www_group = get_group_id(args.www_group)
