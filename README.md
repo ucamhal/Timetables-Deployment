@@ -13,15 +13,15 @@ It's quite simple. It basically performs these steps:
 
 The path to the directory containing the deployment is returned upon success.
 
-    $ sudo timetables-deploy.py --www-user www --www-group www --config timetables/config/config.txt --tag 2012-01-05T1038 --data tmp/data/ --source https://h4l@github.com/h4l/timetables.git /tmp/ 
+    $ sudo timetablesdeploy.py --www-user www --www-group www --config timetables/config/config.txt --tag 2012-01-05T1038 --data tmp/data/ --source https://h4l@github.com/h4l/timetables.git /tmp/ 
     /tmp/timetables-2012-01-05T1038-20120105T113358
 
 ## Usage
 
-You can run `$ timetables-deploy.py -h` for full usage/help:
+You can run `$ timetablesdeploy.py -h` for full usage/help:
 
-    $ timetables-deploy.py -h
-    usage: timetables-deploy.py [-h] -s PATH -t TAG -c PATH -d PATH [-n NAME] -u
+    $ timetablesdeploy.py -h
+    usage: timetablesdeploy.py [-h] -s PATH -t TAG -c PATH -d PATH [-n NAME] -u
                                 NAME -g NAME
                                 [DESTINATION]
     

@@ -28,15 +28,15 @@ Timetables deployment, allowing greater confidence that a given deployment can
 be repeated.
 """
 
-import argparse, collections, git, tempfile, os, shutil, sys, pwd, grp
+import argparse, collections, git, tempfile, os, shutil, sys, pwd, grp, sys, re
 from os.path import join
 from datetime import datetime
 
 def create_temp_directory():
     return tempfile.mkdtemp()
 
-def init_directory_from_git_repository(dir, repo_path, tag):
-    repo = git.Repo.clone_from(repo_path, dir)
+def init_directory_from_git_repository(dir_path, repo_path, tag):
+    repo = git.Repo.clone_from(repo_path, dir_path)
     if not tag in repo.tags:
         raise Exception("No such tag: {0}".format(tag))
     repo.git.checkout("tags/{0}".format(tag))
@@ -45,56 +45,50 @@ def init_directory_from_git_repository(dir, repo_path, tag):
 # specified revision/tag is cloned and the config and data are overlayed. The
 # path to the directory is returned on success.
 def stage_deployment(config):
-     dir = create_temp_directory()
-     try:
-         populate_directory(dir, config)
-     except:
-         cleanup(dir)
-         raise
-     return dir
+    dir_path = create_temp_directory()
+    try:
+        populate_directory(dir_path, config)
+    except:
+        cleanup(dir_path)
+        raise
+    return dir_path
 
-def create_if_not_present(path):
-    with open(path, "a"):
-        pass
-
-def populate_directory(dir, config):
-    init_directory_from_git_repository(dir, config.source_repo_path, 
+def populate_directory(dir_path, config):
+    init_directory_from_git_repository(dir_path, config.source_repo_path, 
                                        config.source_tag)
-    overlay_config(dir, config.config_path)
-    overlay_data(dir, config.data_path)
-    # The log file currently has to exist
-    create_if_not_present(join(dir, LOG_PATH))
-    setup_permissions(dir, config.www_user, config.www_group)
-    create_deployment_file(dir, config)
+    overlay_config(dir_path, config.config_path)
+    overlay_data(dir_path, config.data_path)
+    setup_permissions(dir_path, config.www_user, config.www_group)
+    create_deployment_file(dir_path, config)
 
-def overlay_data(dir, data_path):
-    dest_dir = join(dir, DATA_PATH)
+def overlay_data(dir_path, data_path):
+    dest_dir = join(dir_path, DATA_PATH)
     shutil.copytree(data_path, dest_dir)
 
-def overlay_config(dir, config_path):
-    dest_path = join(dir, CONFIG_PATH)
+def overlay_config(dir_path, config_path):
+    dest_path = join(dir_path, CONFIG_PATH)
     shutil.copyfile(config_path, dest_path)
 
-def recursive_take_ownership(dir, user, group):
+def recursive_take_ownership(dir_path, user, group):
     def take_ownership(path, isdir=False):
         os.chown(path, user, group)
         os.chmod(path, 0770 if isdir else 0660)
     
-    for path, dirs, files in os.walk(dir):
+    for path, dirs, files in os.walk(dir_path):
         take_ownership(path, isdir=True)
         for file in files: take_ownership(join(path, file))
 
-def setup_permissions(dir, www_user, www_group):
-    recursive_take_ownership(join(dir, SECRET_PATH), www_user, www_group)
-    recursive_take_ownership(join(dir, DATA_PATH), www_user, www_group)
-    os.chown(dir, -1, www_group)
-    os.chmod(dir, 0750)
+def setup_permissions(dir_path, www_user, www_group):
+    recursive_take_ownership(join(dir_path, SECRET_PATH), www_user, www_group)
+    recursive_take_ownership(join(dir_path, DATA_PATH), www_user, www_group)
+    os.chown(dir_path, -1, www_group)
+    os.chmod(dir_path, 0750)
 
 def timestamp():
     return datetime.now().strftime(ISO_8601_DT_BASIC)
 
-def create_deployment_file(dir, config):
-    with open(join(dir, DEPLOYMENT_FILE), "w") as f:
+def create_deployment_file(dir_path, config):
+    with open(join(dir_path, DEPLOYMENT_FILE), "w") as f:
         f.write(DEPLOYMENT_FILE_TEMPLATE.format(config.source_repo_path,
                                                 config.source_tag,
                                                 config.timestamp))
@@ -117,6 +111,45 @@ def deploy(config):
         cleanup(staged_deployment_dir)
         raise
     return deployment_destination_dir
+
+def default_user_id():
+    return os.getuid()
+
+def default_group_id():
+    return pwd.getpwuid(default_user_id()).pw_gid
+
+def is_int(string):
+    return bool(re.match("^\d+$", string))
+
+# Gets the group ID of a group name
+def get_group_id(group_name):
+    if is_int(group_name):
+        return int(group_name)
+    return grp.getgrnam(group_name).gr_gid
+
+# Gets the user ID of a user name
+def get_user_id(user_name):
+    if is_int(user_name):
+        return int(user_name)
+    return pwd.getpwnam(user_name).pw_uid
+
+def create_config(cmd_line_args):
+    config_args = filter(lambda (k,v): k in DeploymentConfig._fields,
+                         vars(cmd_line_args).items())
+    config_args.append(("timestamp", timestamp()))
+    return DeploymentConfig(**dict(config_args))
+
+def run(args):
+    if os.name != "posix":
+        print >> sys.stderr, "** I don't appear to be running on a UNIX system. "\
+                             "I'm probably not going to work. **"
+    args = PARSER.parse_args(args)
+    # Convert user and group names to IDs for use with chmod/chown
+    args.www_group = get_group_id(args.www_group)
+    args.www_user = get_user_id(args.www_user)
+    config = create_config(args)
+    deployed_location = deploy(config)
+    return deployed_location
 
 # Define our command line arguments
 PARSER = argparse.ArgumentParser(description=__doc__)
@@ -143,24 +176,25 @@ PARSER.add_argument("-n", "--name", metavar="NAME", default="timetables",
                     dest="deployment_name",
                     help="The name of the deployment. This will be used as the "
                     "prefix to the name of the deployment directory.")
-PARSER.add_argument("-u", "--www-user", metavar="NAME", dest="www_user",
-                    required=True,
-                    help="The user name the web server runs as.")
-PARSER.add_argument("-g", "--www-group", metavar="NAME", dest="www_group",
-                    required=True,
-                    help="The group name the web server runs as.")
+PARSER.add_argument("-u", "--www-user", metavar="NAME|UID", dest="www_user",
+                    default=str(default_user_id()),
+                    help="The user name the web server runs as. "
+                    "(default: current user)")
+PARSER.add_argument("-g", "--www-group", metavar="NAME|GID", dest="www_group",
+                    default=str(default_group_id()),
+                    help="The group name the web server runs as."
+                    "(default: current user's group)")
 
 # strftime() format string for ISO 8601 datetime basic (no hyphens or colons) 
 ISO_8601_DT_BASIC = "%Y%m%dT%H%M%S"
 
 CONFIG_PATH = "config/config.txt"
 DATA_PATH = "data/"
-LOG_PATH = DATA_PATH + "log.txt"
 SECRET_PATH = "secret/"
 DEPLOYMENT_FILE = "DEPLOYMENT"
 
 DEPLOYMENT_FILE_TEMPLATE =\
-"""# The contents of this directory were created by timetables-deploy.py
+"""# The contents of this directory were created by timetablesdeploy.py
 repository: {0}
 tag: {1}
 time: {2}
@@ -171,28 +205,5 @@ DeploymentConfig = collections.namedtuple("DeploymentConfig", [
         "www_user", "www_group", "destination_path", "deployment_name", 
         "timestamp"])
 
-# Gets the group ID of a group name
-def get_group_id(group_name):
-    return grp.getgrnam(group_name).gr_gid
-
-# Gets the user ID of a user name
-def get_user_id(user_name):
-    return pwd.getpwnam(user_name).pw_uid
-
-def create_config(cmd_line_args):
-    config_args = filter(lambda (k,v): k in DeploymentConfig._fields,
-                         vars(cmd_line_args).items())
-    config_args.append(("timestamp", timestamp()))
-    return DeploymentConfig(**dict(config_args))
-
 if __name__ == "__main__":
-    if os.name != "posix":
-        print >> sys.stderr, "** I don't appear to be running on a UNIX system. "\
-                             "I'm probably not going to work. **"
-    args = PARSER.parse_args()
-    # Convert user and group names to IDs for use with chmod/chown
-    args.www_group = get_group_id(args.www_group)
-    args.www_user = get_user_id(args.www_user)
-    config = create_config(args)
-    deployed_location = deploy(config)
-    print deployed_location
+    print run(sys.argv[1:])
