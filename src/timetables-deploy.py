@@ -87,6 +87,8 @@ def recursive_take_ownership(dir, user, group):
 def setup_permissions(dir, www_user, www_group):
     recursive_take_ownership(join(dir, SECRET_PATH), www_user, www_group)
     recursive_take_ownership(join(dir, DATA_PATH), www_user, www_group)
+    os.chown(dir, -1, www_group)
+    os.chmod(dir, 0750)
 
 def timestamp():
     return datetime.now().strftime(ISO_8601_DT_BASIC)
@@ -96,6 +98,7 @@ def create_deployment_file(dir, config):
         f.write(DEPLOYMENT_FILE_TEMPLATE.format(config.source_repo_path,
                                                 config.source_tag,
                                                 config.timestamp))
+        os.fchmod(f.fileno(), 0444)
 
 def deployment_dir_name(deployment_name, source_tag, timestamp):
     return "{0}-{1}-{2}".format(deployment_name, source_tag, timestamp)
