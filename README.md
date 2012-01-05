@@ -1,4 +1,4 @@
- Deployment
+# Timetables Deployment
 
 This tool can be used to reduce the legwork and potential for error involved in creating a ready to run deployment of the [Timetables](https://github.com/ieb/timetables) webapp.
 
